@@ -151,4 +151,4 @@ A survivorship-biased, revised-vintage, low-dimensional dataset and estimated co
 
 
 ### Data distribution note
-The **GitHub-ready ZIP deliberately excludes the source market-data binaries**. It includes all model source, generated research outputs, report and tests. To reproduce, download the original Parquet and three Kenneth French ZIPs using the published source links, placing them in `data/raw/` with the exact filenames. The separately supplied *complete local research ZIP* contains copies of the user-provided source files. The local derived feature cache is not part of the public repository.
+This GitHub repository deliberately excludes the source market-data binaries. It includes all model source, generated research outputs, report and tests. To reproduce, download the original Parquet and three Kenneth French ZIPs using the published source links, placing them in `data/raw/` with the exact filenames. The separately supplied *complete local research ZIP* contains copies of the user-provided source files. The local derived feature cache is not part of the public repository.
