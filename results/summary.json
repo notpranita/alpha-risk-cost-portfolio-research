@@ -1,0 +1,89 @@
+{
+  "study": "Real historical equities; CURRENT S&P 500 CONSTITUENTS only (survivorship biased)",
+  "data_date_max": "2026-11-10",
+  "actual_data_rows": 1444124,
+  "unique_tickers": 503,
+  "sample_start": "2020-01",
+  "sample_end": "2025-11",
+  "universe_size": 40,
+  "n_oos_months": 71,
+  "forecast_spearman_ic_mean": -0.019300795391485878,
+  "forecast_ic_positive_fraction": 0.49295774647887325,
+  "risk_factors": [
+    "Mkt-RF",
+    "SMB",
+    "HML",
+    "RMW",
+    "CMA",
+    "MOM"
+  ],
+  "forecast_features": [
+    "mom12",
+    "mom6",
+    "reversal",
+    "lowvol",
+    "lowrange",
+    "liq",
+    "peer_mom",
+    "regime_mom",
+    "disp_mom"
+  ],
+  "fundamental_value_quality_earnings": "NOT IMPLEMENTED: no point-in-time fundamental data supplied",
+  "benchmark": "rebalanced equal-weight basket of the same selected 40 liquid surviving stocks",
+  "market_index_reference": "Fama-French market portfolio, not S&P 500",
+  "trade_timing": "signals at month-end closing prices; enter next month first trading session open; exit following first trading session open, adjusted-price approximation",
+  "cost_model": "quarter of daily high-low range plus nonlinear volatility/ADV proxy; not calibrated to trade prints",
+  "cost_accounting": "actual realized net return charged to all strategies; liquidation of dropped holdings at 50bps assumed",
+  "strategies": {
+    "alpha": {
+      "months": 71,
+      "cagr": 0.07666294513962657,
+      "volatility": 0.2745496885712375,
+      "sharpe_zero_rf": 0.4036944241710899,
+      "max_drawdown": -0.44553695185399833,
+      "final_wealth": 1.548122365514493,
+      "average_monthly_turnover": 0.5500910429964659,
+      "total_trading_cost_fraction": 0.5899650041001719,
+      "avg_forecast_tracking_error": 0.03719115685171643,
+      "information_ratio_vs_equal_weight": -0.44013485063645497,
+      "mean_monthly_active_return": -0.004822646792376025
+    },
+    "benchmark": {
+      "months": 71,
+      "cagr": 0.1551385907689431,
+      "volatility": 0.21814521718932717,
+      "sharpe_zero_rf": 0.7733652936163667,
+      "max_drawdown": -0.32994141187870585,
+      "final_wealth": 2.3473889186136674,
+      "average_monthly_turnover": 0.2007914443499807,
+      "total_trading_cost_fraction": 0.17885635625203952,
+      "avg_forecast_tracking_error": 0.0
+    },
+    "cost": {
+      "months": 71,
+      "cagr": 0.14969190580263558,
+      "volatility": 0.2387583986556269,
+      "sharpe_zero_rf": 0.706503854444087,
+      "max_drawdown": -0.41802394385618946,
+      "final_wealth": 2.2826555748902697,
+      "average_monthly_turnover": 0.19803386576873613,
+      "total_trading_cost_fraction": 0.1640608579845333,
+      "avg_forecast_tracking_error": 0.014886682035658922,
+      "information_ratio_vs_equal_weight": -0.0003835677503866202,
+      "mean_monthly_active_return": -1.850917627646436e-06
+    },
+    "risk": {
+      "months": 71,
+      "cagr": 0.091048447594968,
+      "volatility": 0.23065638035999766,
+      "sharpe_zero_rf": 0.4932860873279512,
+      "max_drawdown": -0.41249675415455855,
+      "final_wealth": 1.6745979088709928,
+      "average_monthly_turnover": 0.5206192829812432,
+      "total_trading_cost_fraction": 0.4965383253575311,
+      "avg_forecast_tracking_error": 0.015928372403396316,
+      "information_ratio_vs_equal_weight": -0.794824492514504,
+      "mean_monthly_active_return": -0.004577196379801597
+    }
+  }
+}

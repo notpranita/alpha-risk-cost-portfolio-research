@@ -1,57 +1,48 @@
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from acadian_arc.data import generate_synthetic_panel, validate_panel
+from acadian_real.data import load_factors,french_zip,prices
+ROOT=Path(__file__).resolve().parents[1]
+RAW_PRESENT=(ROOT/'data/raw/sp500-stock-prices.parquet').exists() and (ROOT/'data/raw/F-F_Momentum_Factor_CSV.zip').exists()
+PANEL_PRESENT=(ROOT/'data/processed/panel.pkl').exists()
 
+@pytest.mark.skipif(not RAW_PRESENT,reason="download the four original market datasets first")
+def test_five_factor_monthly_units():
+ f,i=load_factors(ROOT/'data/raw')
+ assert list(f.columns)==['Mkt-RF','SMB','HML','RMW','CMA','RF','MOM']
+ assert len(f)>700 and len(i)>1000 and i.shape[1]==49
+ assert f.index.is_unique and i.index.is_unique
+ assert f.loc['2025-01':'2025-12'].shape[0]==12
 
-def test_synthetic_deterministic(panel):
-    same = generate_synthetic_panel(months=22, seed=42)
-    pd.testing.assert_frame_equal(panel, same)
+@pytest.mark.skipif(not RAW_PRESENT,reason="market source files are not committed")
+def test_french_2026_sep_positive_rf():
+ f,_=load_factors(ROOT/'data/raw');assert 0<f.loc['2026-09-30','RF']<.01
 
+@pytest.mark.skipif(not RAW_PRESENT,reason="market source files are not committed")
+def test_parquet_real_rows_and_bounds():
+ p=ROOT/'data/raw/sp500-stock-prices.parquet'
+ d=prices(p)
+ assert len(d)==1_444_124
+ assert d.ticker.nunique()==503
+ assert d.date.min()==pd.Timestamp('2015-01-02')
+ assert d.date.max()==pd.Timestamp('2026-11-10')
+ assert (d.adj_close>0).all() and (d.volume>=0).all()
+ assert not d.duplicated(['date','ticker']).any()
 
-def test_synthetic_different_seeds(panel):
-    other = generate_synthetic_panel(months=22, seed=41)
-    assert not np.allclose(panel.next_return, other.next_return)
+@pytest.mark.skipif(not PANEL_PRESENT,reason="derived panel is not committed")
+def test_no_lookahead_month_label_alignment():
+ d=pd.read_pickle(ROOT/'data/processed/panel.pkl')[0]
+ df=d.xs('AAPL',level='ticker')
+ assert pd.notna(df.loc['2020-02-29','next_ret']) # next-month OPEN-to-OPEN holding period
+ assert -.5 <= df.loc['2020-02-29','reversal'] <= .5 # ranked signal
 
+def test_no_fundamental_feature_masquerading():
+ from acadian_real.models import FEATURES
+ assert 'earnings' not in FEATURES and 'value' not in FEATURES and 'beta12' not in FEATURES
+ assert 'peer_mom' in FEATURES
 
-def test_benchmark_weights_sum_one(panel):
-    assert np.allclose(panel.groupby("date").benchmark_weight.sum(), 1)
-
-@pytest.mark.parametrize("field", ["quality", "next_return", "adv_usd"])
-def test_missing_numeric_rejected(panel, field):
-    df = panel.copy();df.loc[0,field] = np.nan
-    with pytest.raises(ValueError,match="NaN|infinite"):
-        validate_panel(df)
-
-
-def test_missing_columns_rejected(panel):
-    with pytest.raises(ValueError,match="Missing required"):
-        validate_panel(panel.drop(columns="growth"))
-
-
-def test_duplicate_row_rejected(panel):
-    with pytest.raises(ValueError,match="Duplicate"):
-        validate_panel(pd.concat([panel,panel.iloc[[0]]]))
-
-
-def test_future_available_date_rejected(panel):
-    altered = panel.copy();altered.loc[0,"available_date"] = altered.loc[0,"date"] + pd.Timedelta(days=1)
-    with pytest.raises(ValueError,match="look-ahead"):
-        validate_panel(altered)
-
-
-def test_fixed_universe_rejected(panel):
-    with pytest.raises(ValueError,match="fixed full-history"):
-        validate_panel(panel.drop(index=0))
-
-
-def test_invalid_price_return_rejected(panel):
-    bad=panel.copy();bad.loc[0,"next_return"]=-1.0
-    with pytest.raises(ValueError,match="-100%"):
-        validate_panel(bad)
-
-
-def test_bad_benchmark_rejected(panel):
-    bad=panel.copy();bad.loc[0,"benchmark_weight"]=.99
-    with pytest.raises(ValueError,match="sum to 1"):
-        validate_panel(bad)
+@pytest.mark.skipif(not RAW_PRESENT,reason="market source files are not committed")
+def test_missing_sentinel_replaced():
+ f,_=load_factors(ROOT/'data/raw')
+ assert np.isfinite(f.loc['2019-01':'2025-12'].to_numpy()).all()

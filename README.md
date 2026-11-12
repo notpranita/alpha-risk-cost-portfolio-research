@@ -1,196 +1,154 @@
-# Alpha–Risk–Cost: A Transparent Systematic Equity Research Framework
+# Bottom-Up Equity Return Forecasting under an Explicit Alpha–Risk–Cost Objective
 
-[![Tests](https://img.shields.io/badge/tests-47%20passed-brightgreen)](#tests-and-reproducibility) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Status](https://img.shields.io/badge/data-synthetic%20demonstration-orange)
+**An independent, reproducible US equity research implementation informed by Acadian Asset Management's publicly disclosed systematic investment framework.**
 
-> **Research question:** When a bottom-up equity forecasting signal is converted into portfolio weights, how do benchmark-relative risk constraints and nonlinear trading costs affect positions, turnover, and realized net returns?
->
-> **Scope:** This repository implements an **independent academic approximation** motivated by the publicly described investment process of Acadian Asset Management. It is **not Acadian source code, its investment advice, or a reproduction of its proprietary models.** The committed example uses **fictional simulated securities**, not historical performance.
+> **Empirical, not simulated:** 1,444,124 actual daily stock-price observations across 503 tickers (2015-01-02 to 2026-11-10), the Fama/French five factors, the momentum factor, and 49 industry return series. **Not an Acadian strategy, proprietary-model reconstruction, endorsement, or investable track record.** The price universe contains only today's S&P 500 members and therefore suffers from **survivorship bias**. The supplied data contain no stock-level fundamentals, quotes, or executions.
 
-## Read this first
+![Wealth paths](results/figures/01_wealth.png)
 
-- **[Research methodology](docs/METHODOLOGY.md)** — assumptions, five forecasting layers, risk factor mathematics, cost function, optimizer, and backtest accounting.
-- **[Input data contract](docs/DATA_SCHEMA.md)** — precisely what each field means and how to avoid look-ahead, survivorship, and publication-lag biases.
-- **[Experiments and interpretation](docs/EXPERIMENTS.md)** — control groups, results, sensitivity testing, and what can be concluded from synthetic data.
-- **[Synthetic experiment report](examples/synthetic/EXPERIMENT_REPORT.md)** — generated results from the included fixed-seed demonstration.
-- **[Tests](tests/)** — 47 unit/integration tests for mathematical, accounting, and data integrity; see current test run in CI.
+## 1. Research question
 
-## Overview of the research system
+**Does the addition of explicit benchmark-relative factor risk and modeled liquidity-dependent transaction costs improve the implementability of bottom-up equity forecasts?** This question does **not** presume that forecast information coefficients, investment alpha, or net returns will be positive.
+
+The investment-process mapping follows Acadian Asset Management Inc., *Investor Forum*, May 19, 2026, slides 19–23, Exhibit 99.2 [SEC filing](https://www.sec.gov/Archives/edgar/data/1748824/000162828026036160/a2026-masterfilexirforum.htm). The firm's examples are stylized, and its proprietary models are not available. Our models, signals, constraints, and hyperparameters are our own transparent research approximations.
+
+## 2. Research architecture
 
 ```mermaid
 flowchart TD
-    A[As-of monthly equity panel] --> B[Cross-sectional signals]
-    B --> C[Five Ridge return models]
-    C --> C1[Stock-specific]
-    C --> C2[Industry peers]
-    C --> C3[Country]
-    C --> C4[Industry]
-    C --> C5[Country × Industry]
-    C1 --> D[Blended monthly alpha]
-    C2 --> D
-    C3 --> D
-    C4 --> D
-    C5 --> D
-    A --> E[Historical factor returns]
-    E --> F[Factor covariance + specific risk]
-    A --> G[Spread / ADV / volatility]
-    G --> H[Trade-cost estimator]
-    D --> I[Constrained optimizer]
-    F --> I
-    H --> I
-    I --> J[Target allocations and order profile]
-    J --> K[Monthly walk-forward backtest]
-    K --> L[Returns, attribution, figures, CSV/JSON]
+ A[Actual daily adjusted stock prices, OHLCV] --> B[End-of-month signal generation]
+ C[Historical Fama–French 5 + Momentum factors] --> D[Rolling 6-factor risk model]
+ E[49 historical industry portfolios] --> B
+ B --> F[Rolling pooled Ridge regression: next-period stock returns]
+ B --> G[Historical-correlation peer network]
+ G --> F
+ F --> H[Cross-sectional stock return forecasts]
+ D --> I[Systematic + specific risk; active-factor constraints]
+ H --> J[Constrained portfolio optimization]
+ I --> J
+ A --> K[ADV, intraday-range proxy, volatility]
+ K --> L[Modeled spread and nonlinear impact cost]
+ L --> J
+ J --> M[First trading session of following month: modeled entry]
+ M --> N[Next-month open-to-open realized holding return]
+ N --> O[Net P&L, IC, HAC tests, attribution, sensitivity]
 ```
 
-### Models and implementation — trace each concept to code
+## 3. Mathematical objective
 
-| Research component | Financial model / method | Implementation | Why it is there |
+Let `w` be proposed holdings, `b` equal-weight benchmark holdings, `w_prev` pre-trade drifted holdings, `alpha` expected next-holding-period returns and `Sigma` the forecast monthly covariance.
+
+\[
+\max_{\mathbf{w}}\; \widehat{\boldsymbol{\alpha}}^\top\mathbf{w}
+-\frac{\lambda}{2}(\mathbf{w}-\mathbf{b})^\top\widehat{\Sigma}(\mathbf{w}-\mathbf{b})
+-\mathcal{C}(\mathbf{w}-\mathbf{w}_{prev})
+\]
+
+Subject to full investment, nonnegative weights, 10% single-stock cap, active market-factor beta within ±0.15 and each of five nonmarket Fama/French style-factor exposures within ±0.30 (for risk-aware and cost-aware portfolios). The alpha-only ablation does not enforce the factor caps. The cost-aware objective embeds trade-cost estimates; **realized costs are charged to all portfolios for fair comparison.**
+
+**Nonlinear cost proxy (fraction of NAV):**
+
+\[
+\mathcal{C}(\Delta\mathbf{w}) = \sum_i \left[ 0.25\,{\rm Range}_{20,i}|\Delta w_i| + 0.08\,\sigma_{m,i}\sqrt{\frac{AUM}{ADV_{20,i}}}|\Delta w_i|^{3/2}\right]
+\]
+
+Here `Range20` is median relative **daily high-to-low range**, *not an observed bid–ask spread*. `ADV20` is trailing 20-trading-day dollar volume. Assumed AUM is USD 10 million. Additional 50 bp liquidation cost is assumed on stocks leaving the eligible universe. No commissions, borrow fees, taxes, or actual trade-level slippage are observed.
+
+## 4. Implemented components and model details
+
+| Component | Implementation | Module | Model discipline |
 |---|---|---|---|
-| As-of panel | Monthly decision dates, observable feature checks, strictly later return labels | `data.py`, `signals.py` | Avoid data leakage and make the information set explicit |
-| Equity signals | Sector-relative winsorization, cross-sectional z-scores, leave-one-out peers | `signals.py` | Normalize and organize heterogeneous predictors |
-| Expected returns | **Five separate StandardScaler + Ridge regressions** fitted on preceding months | `forecast.py` | Obtain a transparent, regularized five-layer forecast |
-| Factor risk | Historical cross-sectional factor-return regressions, **Ledoit–Wolf** shrinkage, diagonal idiosyncratic variance | `risk.py` | Estimate portfolio tracking-error risk and explain factor contributions |
-| Transaction costs | Half quoted-spread proxy + **participation-aware 3/2-power impact** | `costs.py` | Penalize portfolio changes, not just final holdings |
-| Portfolio construction | Benchmark-relative **SLSQP** nonlinear optimization with analytical gradient and linear constraints | `optimizer.py` | Balance estimated alpha, risk, and trade costs |
-| Monthly accounting | Lagged training, pretrade drift, cost deduction, alternative strategies | `backtest.py` | Evaluate the entire decision chain out of sample |
-| Analytics | CAGR, active return, tracking error, information ratio, drawdown, Spearman rank IC | `metrics.py`, `reporting.py` | Report forecasts and portfolio outcomes separately |
-| Command-line experiment | Deterministic synthetic generator and export pipeline | `cli.py` | Reproduce outputs without manual notebook steps |
+| Data and alignment | Daily adjusted OHLCV → monthly panel; French archives parsed and converted from percent | `data.py` | Missing returns fail loudly; no forward fill |
+| Stock alpha | 12-to-2 and 6-to-2 momentum, one-month reversal, low-volatility, intraday-range, liquidity | `data.py`, `models.py` | No fundamentals pretended; market beta not a direct alpha signal |
+| Peer return model | Top-five historical-correlation neighbors from a historical 12-month lookback | `data.py` | Network formed only from past returns, current liquid candidates |
+| Macro context | Past 6-month Fama/French market trend and past 3-month industry return dispersion interacted with momentum | `data.py` | Public index proxies, not Acadian country models |
+| Forecast engine | Cross-sectional percentile ranks, expanding through each prior 48-month window, pooled Ridge (α=100) | `models.py` | Only labels available at portfolio decision time are used |
+| Six-factor risk | Rolling stock-on-factor OLS exposures, Ledoit–Wolf shrinkage of factor covariance and diagonal residual variances | `models.py` | 36-month past window, PSD covariance |
+| Portfolio construction | SLSQP analytic-gradient constrained optimizer, benchmark-relative risk penalty λ=12 | `portfolio.py` | Weight sum, bound and style exposure constraints |
+| Trading-cost model | Liquidity/volatility/range proxies and nonlinear participation impact | `portfolio.py` | Assumed calibration, not actual quotes or fills |
+| Historical evaluation | Monthly forward open-to-open implementation, net cost accounting and turnover | `study.py` | No execution at the signal close |
+| Independent diagnostics | Rank IC, Newey–West HAC active mean inference, six-factor regression, regimes, cost sensitivity and 10 figures | `reporting.py` | Statistical inference does not establish causal alpha |
 
-**Terminology note:** The example uses `sector` as a coarse proxy for an industry peer group. The five forecast *layers* are structurally inspired by the public description, while feature sets, regression coefficients, blend weights, trading coefficients, and return-generating process are **our own research design**.
+For mathematical detail see [Methodology](docs/METHODOLOGY.md); [Data Audit](docs/DATA_AUDIT.md); [Limitations](docs/LIMITATIONS.md); [Research Results](docs/RESULTS.md).
 
-## The portfolio objective
+## 5. Historical evaluation and results
 
-At month $t$, choose target weights $w$ relative to benchmark $b$, with pretrade drifted holdings $p$, expected **monthly** returns $\hat\alpha$, and **monthly** stock covariance $\Sigma$:
+71 monthly end-of-month decisions **January 2020–November 2025**, investing on the next month's first trading-session open and exiting on the first session of the month after that (realized holding periods approximately February 2020–December 2025). Each month uses the top 40 stocks by **trailing, observable dollar ADV** among those with sufficiently complete signals and 252 prior trading observations. The test benchmark is a monthly rebalanced **equal-weight basket of those same 40 survivor-universe securities**; it is not the published S&P 500 index.
 
-$$
-\underset{w}{\operatorname{maximize}}\quad
-\hat\alpha^{\mathsf T}(w-b)
--\frac{\lambda}{2}(w-b)^{\mathsf T}\Sigma(w-b)
--\gamma\sum_i\left[
-\frac{s_i}{20{,}000}|w_i-p_i|
-+k\frac{\sigma_{i,\mathrm{month}}}{\sqrt{21}}
-\sqrt{\frac{\mathrm{AUM}}{\mathrm{ADV}_i\,d}}
-|w_i-p_i|^{3/2}\right].
-$$
+| Strategy | CAGR (net) | Annual volatility | Max drawdown | Avg. one-way monthly turnover |
+|:--|--:|--:|--:|--:|
+| Equal-weight liquid-basket benchmark | **15.51%** | 21.81% | −32.99% | 20.08% |
+| Forecast / alpha only | 7.67% | 27.45% | −44.55% | 55.01% |
+| Forecast + explicit factor risk | 9.10% | 23.07% | −41.25% | 52.06% |
+| Forecast + factor risk + nonlinear costs | 14.97% | 23.88% | −41.80% | 19.80% |
 
-Where $s_i$ is the bid–ask spread in basis points (full spread), $d$ is assumed execution days, $k$ is an *illustrative* impact coefficient, and $\gamma$ controls use of forecast transaction costs in the objective. Portfolio costs are unitless fractions of AUM.
+**Do not equate portfolio CAGR with statistically significant alpha.** Across 71 out-of-sample decisions mean cross-sectional Spearman forecast IC = **−0.0193** (Newey–West p = **0.410**), and the cost-aware portfolio's average net active return relative to the liquid-basket benchmark is approximately −0.00019% per month (HAC p = **0.999**). The cost-aware approach substantially reduces turnover relative to alpha-only and risk-only allocations, but **does not beat the equal-weight benchmark** in this experiment. The six-factor intercept is also not significant. See [Research Results](docs/RESULTS.md).
 
-Subject to long-only, full-investment, max individual holding and active weight, sector-relative bounds, total gross turnover, and percentage-of-ADV participation limits. `optimizer.py` introduces \(u_i\ge |w_i-p_i|\) for turnover and participation constraints. The objective is convex in minimization form for positive-semidefinite \(\Sigma\), though numerical SLSQP convergence is not guaranteed for all admissible inputs. The implementation validates numerical feasibility after solving.
+| Figures | Preview |
+|--|--|
+| Full-sample wealth and drawdowns | [Net wealth](results/figures/01_wealth.png) · [Drawdowns](results/figures/02_drawdowns.png) |
+| Annual performance | [Annual returns](results/figures/03_annual.png) · [Active return](results/figures/07_active.png) |
+| Implementation friction | [Turnover](results/figures/04_turnover.png) · [Cost accrual](results/figures/05_costs.png) · [Cost drag](results/figures/09_costdrag.png) |
+| Forecast diagnostic and exposures | [Rank IC](results/figures/06_ic.png) · [Factor exposures](results/figures/08_exposures.png) · [Position cap](results/figures/10_position.png) |
 
-The optimizer uses **risk and cost forecasts** from past inputs, then the backtest subtracts **modeled** costs from realized next-period gross returns. This is *not* a fill simulator.
-
-## What is actually implemented — and what is not
-
-| Included and exercised | Not included / not established |
-|---|---|
-| Five regression-based alpha component models | Acadian's actual signals, model architecture, or signal weights |
-| Factor exposures, shrinkage covariance, factor/specific risk attribution | Calibrated institutional proprietary risk model or a validated full Barra-style model |
-| Nonlinear cost model and ADV constraints | Consolidated real quote/trade history, calibrated realized slippage, real trading |
-| Long-only constrained optimizer and three strategy ablations | Short-selling, futures/FX hedging, tax lots, corporate actions |
-| Multi-month walk-forward **synthetic** backtest with drifted positions | Survivorship-free global point-in-time equity history and a verified live-data backtest |
-| Outputs, automated tests, and CI workflow | Any evidence of an investable strategy, predictive market alpha, or actual performance |
-
-## Run locally
-
-**Requirements:** Python >= 3.10. No brokerage credentials, APIs, or proprietary data required for the demo.
-
-```bash
-# From the repository root:
-python -m venv .venv
-# Linux/macOS:
-source .venv/bin/activate
-# Windows PowerShell:
-# .venv\Scripts\Activate.ps1
-
-python -m pip install -e '.[dev]'
-
-# Cross-platform Python command:
-python -m acadian_arc.cli --months 42 --seed 17 --output-dir reports/my-synthetic-run
-
-# Or installed console entry point:
-acadian-arc --months 42 --seed 17 --output-dir reports/my-synthetic-run
-
-# Run test suite:
-python -m pytest -q --cov=acadian_arc --cov-report=term-missing
-```
-
-If the local numerical backend is unusually slow, set `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, and `MKL_NUM_THREADS=1` before Python starts. The test workflow does this on CI. For plotting on a headless server, set `MPLBACKEND=Agg`.
-
-**Input your own panel** (after reading the bias warnings in [DATA_SCHEMA.md](docs/DATA_SCHEMA.md)):
-
-```bash
-acadian-arc --input-csv path/to/asof_monthly_panel.csv --output-dir reports/user-panel
-```
-
-This only accepts already-prepared monthly panel data. There is **no real-data downloader** or historical-universe builder. Loading a CSV does not validate that its economic history is unbiased.
-
-## Reproducible outputs
-
-The committed `examples/synthetic/` directory contains generated outputs, allowing visitors to inspect results without running anything:
-
-| File | Contents |
-|---|---|
-| `EXPERIMENT_REPORT.md` | Human-readable synthetic demonstration findings and audit trail |
-| `summary.json` | Strategy statistics, configuration and forecast IC |
-| `stock_forecasts.csv` | Date, ticker, training cutoff, 5 component forecasts and next-month label |
-| `risk_attribution.csv` | Model-implied active-variance decomposition by group |
-| `portfolio_weights.csv` | Benchmark, pretrade, optimized weights and trade sizes |
-| `transaction_costs.csv` | Estimated half-spread and impact components |
-| `monthly_returns.csv` | Monthly strategy gross/net simple returns |
-| `order_profile.csv` | Illustration of trade participation and execution buckets |
-| `synthetic_wealth.png` | Net-of-model-cost portfolio wealth trajectories |
-| `synthetic_costs.png` | Cumulative estimated cost comparison |
-
-### Example output (synthetic data; **not actual investment performance**)
-
-![Illustrative synthetic strategy wealth](examples/synthetic/synthetic_wealth.png)
-
-![Illustrative modeled trading costs](examples/synthetic/synthetic_costs.png)
-
-The initial 42-month fictional-universe experiment generated **27** out-of-sample monthly decisions (15 warm-up months). It showed the cost-aware model having somewhat lower modeled trading costs and turnover than the alternatives, but **not the highest realized synthetic CAGR**. This is a desirable transparent research outcome: it avoids asserting a guaranteed benefit from cost awareness. Exact metrics are in the report and depend on the fixed seed/configuration.
-
-For instructions to publish this repository cleanly, see **[GitHub publishing guide](docs/GITHUB_GUIDE.md)**. For test details, see **[validation evidence](docs/VALIDATION.md)**.
-
-## Repository map
+## 6. File organization
 
 ```text
 .
 ├── README.md
-├── docs/
-│   ├── METHODOLOGY.md          # Mathematical research methodology
-│   ├── DATA_SCHEMA.md          # Expected input panel and bias controls
-│   ├── EXPERIMENTS.md          # Tests, ablation design and interpretation
-│   ├── VALIDATION.md           # Tests executed and coverage results
-│   └── GITHUB_GUIDE.md         # Upload and presentation instructions
-├── src/acadian_arc/
-│   ├── data.py                 # Validation and fictional generator
-│   ├── signals.py              # Normalization and peer engineering
-│   ├── forecast.py             # Five regularized alpha models
-│   ├── risk.py                 # Factor covariance and risk decomposition
-│   ├── costs.py                # Spread + nonlinear market impact
-│   ├── optimizer.py            # SLSQP portfolio optimizer
-│   ├── backtest.py             # Walk-forward evaluation
-│   ├── metrics.py              # Performance and rank IC
-│   ├── reporting.py            # CSV, JSON, plots, report
-│   └── cli.py                  # Reproducible command-line entry point
-├── tests/                      # Unit and integration tests
-├── configs/research.json      # Reproducible optimizer settings
-├── examples/synthetic/         # Generated committed demonstration
-├── .github/workflows/ci.yml    # CI on commits and pull requests
 ├── pyproject.toml
-└── LICENSE
+├── data/
+│   ├── raw/                    # Original four user-supplied archives; ~45 MB
+│   └── processed/panel.pkl     # Derived historical monthly features
+├── src/acadian_real/
+│   ├── data.py                 # OHLCV and French data parsing, peer features, time alignment
+│   ├── models.py               # Ridge signal forecasts and six-factor risk covariance
+│   ├── portfolio.py            # SLSQP optimizer, analytic cost gradients, accounting
+│   ├── study.py                # Historical month-by-month backtest
+│   ├── reporting.py            # Quantitative inference, sensitivity and figures
+│   ├── parquet_native.py       # Optional narrow offline Parquet fallback for this file
+│   └── parquet_probe.py        # Minimal Thrift metadata parser used by fallback
+├── results/
+│   ├── summary.json
+│   ├── statistical_analysis.json
+│   ├── monthly_returns.csv
+│   ├── stock_forecasts.csv
+│   ├── forecast_diagnostics.csv
+│   ├── factor_exposures.csv
+│   ├── holdings.csv
+│   ├── training_windows.csv
+│   └── figures/                # Ten research figures
+├── docs/
+│   ├── METHODOLOGY.md
+│   ├── RESULTS.md
+│   ├── DATA_AUDIT.md
+│   ├── LIMITATIONS.md
+│   ├── REPRODUCIBILITY.md
+│   └── FORMAL_RESEARCH_REPORT.docx
+└── tests/                       # Unit and integration tests
 ```
 
-## Tests and reproducibility
+## 7. Reproduce the research
 
-Tests cover duplicate/invalid data, timestamp leakage checks, ridge training cutoff, peer construction, PSD risk, additive factor attribution, spread and impact arithmetic, position/sector/turnover/ADV constraints, expected cost monotonicity, and walk-forward accounting. Run `pytest` locally; GitHub Actions also runs tests on Python 3.10 and 3.12. A local validation run on Python 3.13 passed **47/47 tests, 94% statement coverage**, including CLI smoke testing. These results establish software behavior on the tested cases, **not financial validity**.
+Requires Python 3.10+ and recommended 1–2 GB RAM. Download/clone all files, including the `data/raw` subfolder. With Python installed:
 
-## Public evidence and intellectual provenance
+```bash
+python -m pip install -e .
+python -m acadian_real.study --root . --start 2020-01 --end 2025-11
+python -m acadian_real.reporting .
+python -m pytest -q
+```
 
-Acadian's [May 19, 2026 SEC-hosted Investor Forum, especially slides 19–23](https://www.sec.gov/Archives/edgar/data/1748824/000162828026036160/a2026-masterfilexirforum.htm) describes a return-forecast/risk/cost/execution workflow. Slides and their numbers are **illustrative**. The [Investor Forum transcript](https://s25.q4cdn.com/824091080/files/doc_downloads/Downloads/aami-ir-forum-transcript.pdf) explains five underlying forecast categories: stock, peers, and country / industry / country-industry macro layers. Sources are for conceptual motivation only. All code, simplified specifications, synthetic dataset and calibration settings here are independently authored.
+Dependencies include NumPy, pandas, SciPy, scikit-learn, statsmodels, matplotlib, pytest and PyArrow. `parquet_native.py` is an optional limited reader for the provided flat SNAPPY Parquet file on Linux where PyArrow installation is unavailable; it is **not** a general Parquet implementation. Set `OPENBLAS_NUM_THREADS=1` when numerical library overhead slows optimization. Delete `data/processed/panel.pkl` to force feature regeneration after changing source feature code or raw data.
 
-## Next empirical milestone
+## 8. Research boundary and ethics
 
-Build a licensed or public, correctly lagged **historical survivorship-free panel** with true benchmark holdings, fundamentals, returns including delistings, and liquidity. Then report 1-month rank IC, top-minus-bottom decile return, strategy comparison, AUM sensitivity, parameter sensitivity, drawdown and uncertainty intervals over distinct out-of-sample periods. Until then, this is a *tested research-software project*, not an empirically validated investment study.
+**Incomplete components versus Acadian's documented process:** No point-in-time financial statements, book equity, earnings announcements, filing timestamps, sector/security masters, FX/rates forecasts, actual quoted spreads, high-frequency order book, execution records, or global security universe were supplied. This project therefore **does not implement value, quality, earnings, growth, geographic country forecasts, actual industry-linked stock peers, market-impact calibration, live trading, or complete risk/alpha isolation**. Those are labeled as future extensions, not quietly backfilled with inferred data.
 
-**Disclaimer:** Educational research only; not endorsed by, affiliated with, or sponsored by Acadian. No investment recommendation. See [LICENSE](LICENSE).
+A survivorship-biased, revised-vintage, low-dimensional dataset and estimated costs prevent any inference of a production-quality strategy. Results are for methodological research and education, not financial advice.
+
+**Sources:** [Acadian SEC May 2026 Investor Forum](https://www.sec.gov/Archives/edgar/data/1748824/000162828026036160/a2026-masterfilexirforum.htm) (slides 19–23); [Aethereal S&P 500 Stock Prices](https://dataset.aethereal.top/datasets/sp500-stock-prices) (accessed 2026-11-12); [Kenneth R. French Data Library](https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html) (Sept 2026 CRSP release). Academic references and precise interpretations appear in the formal report.
+
+
+### Data distribution note
+The **GitHub-ready ZIP deliberately excludes the source market-data binaries**. It includes all model source, generated research outputs, report and tests. To reproduce, download the original Parquet and three Kenneth French ZIPs using the published source links, placing them in `data/raw/` with the exact filenames. The separately supplied *complete local research ZIP* contains copies of the user-provided source files. The local derived feature cache is not part of the public repository.

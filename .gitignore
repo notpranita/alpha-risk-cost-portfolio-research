@@ -1,14 +1,13 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.coverage
-htmlcov/
-*.egg-info/
 .venv/
-.env
+*.egg-info/
 .DS_Store
-reports/
-outputs/
-data/private/
-data/raw/
-*.parquet
+*.log
+
+# Original third-party market-data files: keep locally; do not publish indiscriminately
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
