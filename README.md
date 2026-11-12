@@ -38,19 +38,19 @@ flowchart TD
 
 Let `w` be proposed holdings, `b` equal-weight benchmark holdings, `w_prev` pre-trade drifted holdings, `alpha` expected next-holding-period returns and `Sigma` the forecast monthly covariance.
 
-\[
+$$
 \max_{\mathbf{w}}\; \widehat{\boldsymbol{\alpha}}^\top\mathbf{w}
 -\frac{\lambda}{2}(\mathbf{w}-\mathbf{b})^\top\widehat{\Sigma}(\mathbf{w}-\mathbf{b})
 -\mathcal{C}(\mathbf{w}-\mathbf{w}_{prev})
-\]
+$$
 
 Subject to full investment, nonnegative weights, 10% single-stock cap, active market-factor beta within ±0.15 and each of five nonmarket Fama/French style-factor exposures within ±0.30 (for risk-aware and cost-aware portfolios). The alpha-only ablation does not enforce the factor caps. The cost-aware objective embeds trade-cost estimates; **realized costs are charged to all portfolios for fair comparison.**
 
 **Nonlinear cost proxy (fraction of NAV):**
 
-\[
-\mathcal{C}(\Delta\mathbf{w}) = \sum_i \left[ 0.25\,{\rm Range}_{20,i}|\Delta w_i| + 0.08\,\sigma_{m,i}\sqrt{\frac{AUM}{ADV_{20,i}}}|\Delta w_i|^{3/2}\right]
-\]
+$$
+\mathcal{C}(\Delta\mathbf{w}) = \sum_i \left[ 0.25\,{\mathrm{Range}}_{20,i}|\Delta w_i| + 0.08\,\sigma_{m,i}\sqrt{\frac{\mathrm{AUM}}{\mathrm{ADV}_{20,i}}}|\Delta w_i|^{3/2}\right]
+$$
 
 Here `Range20` is median relative **daily high-to-low range**, *not an observed bid–ask spread*. `ADV20` is trailing 20-trading-day dollar volume. Assumed AUM is USD 10 million. Additional 50 bp liquidation cost is assumed on stocks leaving the eligible universe. No commissions, borrow fees, taxes, or actual trade-level slippage are observed.
 
